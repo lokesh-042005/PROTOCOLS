@@ -1,44 +1,49 @@
-module uart #(parameter integer clock = 50000000,baudrate = 115200)
-(input clk,
-input rst,
-input uart_rx,
-output uart_tx,
-//transmitter
-input [7:0] tx_data,
-input tx_start,
-input parity_en,
-input parity_type,
-output tx_busy,
-//receiver
-output [7:0]rx_data,
-output rx_valid,
-output rx_error);
+module uart_top #(
+    parameter clk_freq = 50000000,
+    parameter baud = 9600
+)(
+    input clk,
+    input rst,
+    input tx_start,
+    input [7:0] tx_data,
+    output tx,
+    output tx_busy,
+    input rx,
+    output [7:0] rx_data,
+    output rx_done,
+    output parity_error
+);
 
-wire tx_internal;
+wire baud16_tick;
 
+baud_rate_generator #(
+    .clk_freq(clk_freq),
+    .baud(baud)
+)
+baud_gen (
+    .clk(clk),
+    .rst(rst),
+    .baud16_tick(baud16_tick)
+);
 
-transmiter #(.clock(clock),
-	      .baudrate(baudrate))
-uart_tx1(.clk(clk),
-	 .rst(rst),
-	 .tx_data(tx_data),
-	 .tx_start(tx_start),
-	 .parity_en(parity_en),
-     .parity_type(parity_type),
-	 .tx(tx_internal),
-	 .tx_busy(tx_busy));
-	
-receiver #(.clock(clock),
-	   .baudrate(baudrate))
-uart_rx1(.clk(clk),
-	 .rst(rst),
-	 .rx(uart_rx),
-     .parity_en(parity_en),
-     .parity_type(parity_type),
-	 .rx_data(rx_data),
-	 .rx_valid(rx_valid),
-	 .rx_error(rx_error));
+uart_tx tx_inst (
+    .clk(clk),
+    .rst(rst),
+    .baud16_tick(baud16_tick),
+    .tx_start(tx_start),
+    .tx_data(tx_data),
+    .tx(tx),
+    .tx_busy(tx_busy)
+);
 
-assign uart_tx = tx_internal;
+uart_rx rx_inst (
+    .clk(clk),
+    .rst(rst),
+    .rx(rx),
+    .baud16_tick(baud16_tick),
+    .rx_data(rx_data),
+    .rx_done(rx_done),
+    .parity_error(parity_error)
+);
 
 endmodule
