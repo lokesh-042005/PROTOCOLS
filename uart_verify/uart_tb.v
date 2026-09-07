@@ -1,64 +1,117 @@
 module uart_tb;
+
 reg clk;
 reg rst;
-wire uart_rx;
-wire uart_tx;
-//transmitter
-reg [7:0] tx_data;
 reg tx_start;
-reg parity_en;
-reg parity_type;
+reg [7:0] tx_data;
+
+wire tx;
 wire tx_busy;
-//receiver
-wire [7:0]rx_data;
-wire rx_valid;
-wire rx_error;
+wire rx;
+wire [7:0] rx_data;
+wire rx_done;
+wire parity_error;
 
-uart u1(.clk(clk),
-	.rst(rst),
-	.uart_tx(uart_tx),
-	.uart_rx(uart_rx),
-	.tx_data(tx_data),
-	.tx_start(tx_start),
-	.parity_en(parity_en),
-    .parity_type(parity_type),
-	.tx_busy(tx_busy),
-	.rx_data(rx_data),
-	.rx_valid(rx_valid),
-	.rx_error(rx_error));
-	
+assign rx = tx;
+
+uart_top #(
+    .clk_freq(50000000),
+    .baud(9600)
+)
+uut (
+    .clk(clk),
+    .rst(rst),
+    .tx_start(tx_start),
+    .tx_data(tx_data),
+    .tx(tx),
+    .tx_busy(tx_busy),
+    .rx(rx),
+    .rx_data(rx_data),
+    .rx_done(rx_done),
+    .parity_error(parity_error)
+);
+
+initial clk = 1'b0;
+
+always #10 clk = ~clk;
+
 initial begin
-	clk = 0;
-	forever #10clk = ~clk;
-end
-assign uart_rx = uart_tx;
 
-initial begin
-	rst = 1; 
-	tx_data = 8'h64; 
-	tx_start = 0; 
-	parity_en = 1;
-	parity_type = 1;
-	#100;
-	
-	rst = 0;
-	#50;
-	tx_start = 1; 
-	#50; 
-	tx_start = 0; 
-	#50;
-	#2000000;
-	
-    $finish;
-end 
-
-
-initial begin 
-	        $monitor("time=%0t, parity_en=%0d, parity_type=%0d, tx_start=%0d, tx_data=%0d, tx_busy=%0d, uart_tx=%0d, uart_rx=%0d, rx_data=%0d, rx_valid=%0d, rx_error=%0d", $time, parity_en, parity_type, tx_start, tx_data, tx_busy, uart_tx, uart_rx, rx_data, rx_valid, rx_error);
-end
-initial begin
-    $dumpfile("uart_wave.vcd");
+    $dumpfile("wave.vcd");
     $dumpvars(0, uart_tb);
+
+    rst = 1'b1;
+    tx_start = 1'b0;
+    tx_data = 8'h00;
+
+    #20;
+
+    rst = 1'b0;
+
+    wait(!tx_busy);
+
+    @(posedge clk);
+    tx_data = 8'h55;
+    tx_start = 1'b1;
+
+    @(posedge clk);
+    tx_start = 1'b0;
+
+    wait(rx_done);
+
+    $display("TX DATA = %h", 8'h55);
+    $display("RX DATA = %h", rx_data);
+    $display("PARITY ERROR = %b", parity_error);
+
+    if ((rx_data == 8'h55) && (parity_error == 1'b0))
+        $display("BYTE 1 PASS");
+    else
+        $display("BYTE 1 FAIL");
+
+    wait(!tx_busy);
+
+    @(posedge clk);
+    tx_data = 8'hA3;
+    tx_start = 1'b1;
+
+    @(posedge clk);
+    tx_start = 1'b0;
+
+    wait(rx_done);
+
+    $display("TX DATA = %h", 8'hA3);
+    $display("RX DATA = %h", rx_data);
+    $display("PARITY ERROR = %b", parity_error);
+
+    if ((rx_data == 8'hA3) && (parity_error == 1'b0))
+        $display("BYTE 2 PASS");
+    else
+        $display("BYTE 2 FAIL");
+
+    wait(!tx_busy);
+
+    @(posedge clk);
+    tx_data = 8'hF0;
+    tx_start = 1'b1;
+
+    @(posedge clk);
+    tx_start = 1'b0;
+
+    wait(rx_done);
+
+    $display("TX DATA = %h", 8'hF0);
+    $display("RX DATA = %h", rx_data);
+    $display("PARITY ERROR = %b", parity_error);
+
+    if ((rx_data == 8'hF0) && (parity_error == 1'b0))
+        $display("BYTE 3 PASS");
+    else
+        $display("BYTE 3 FAIL");
+
+    #100000;
+
+    $finish;
+
 end
 
 endmodule
