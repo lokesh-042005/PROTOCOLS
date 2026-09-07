@@ -1,160 +1,129 @@
-module transmiter #(parameter integer clock = 50000000,baudrate = 115200)
-(input clk,
-input rst,
-input tx_start,
-input [7:0] tx_data,
-input parity_en,
-input parity_type,
-output reg tx,
-output reg tx_busy);
+module uart_tx(
+    input clk,
+    input rst,
+    input baud16_tick,
+    input tx_start,
+    input [7:0] tx_data,
+    output reg tx,
+    output reg tx_busy
+);
 
-localparam integer t_bit = (clock/baudrate);
+reg [2:0] bit_index;
+reg [7:0] data_reg;
+reg parity_reg;
+reg [2:0] state;
+reg [3:0] sample_count;
 
-reg [2:0] state,next;
-reg [12:0] baudcount;
-reg [2:0] bitcount;
-reg [7:0] shift_reg;
-reg parity;
+localparam idle   = 3'b000,
+           start  = 3'b001,
+           data   = 3'b010,
+           parity = 3'b011,
+           stop   = 3'b100;
 
-parameter tx_idle=3'd0,tx__start=3'd1,tx__data=3'd2,tx_parity=3'd3,tx_stop=3'd4;
-
-always@(posedge clk or posedge rst) begin
-if(rst)
-state <= tx_idle;
-else 
-state <= next;
-end
-
-always @(posedge clk or posedge rst) begin
-
+always @(posedge clk) begin
     if (rst) begin
-        baudcount <= 0;
-        bitcount  <= 0;
+        state        <= idle;
+        tx           <= 1'b1;
+        tx_busy      <= 1'b0;
+        data_reg     <= 8'd0;
+        parity_reg   <= 1'b0;
+        bit_index    <= 3'd0;
+        sample_count <= 4'd0;
     end
-
-    else if (state == tx_idle) begin
-    	     baudcount <= 0;
-    	     bitcount <=0;
-	end
     else begin
-          if (baudcount == t_bit-1) begin
+        case (state)
 
-            baudcount <= 0;
-           
-	  if(state == tx__data)begin
-             if (bitcount < 3'd7)
-                bitcount <= bitcount + 1;
-	    end
-	  end
-	 else begin
-                baudcount <= baudcount +1;
-         end  
-	end
-    end
+            idle: begin
+                tx      <= 1'b1;
+                tx_busy <= 1'b0;
 
-always@(posedge clk or posedge rst) begin
-        if(rst)
-                parity <= 0;
-        else if(state == tx_idle && tx_start) begin
-                if(parity_en) begin
-                        if(parity_type)
-                                parity <= ~^tx_data;
-                        else
-                                parity <= ^tx_data;
+                if (tx_start) begin
+                    data_reg     <= tx_data;
+                    parity_reg   <= ^tx_data;
+                    bit_index    <= 3'd0;
+                    sample_count <= 4'd0;
+                    tx_busy      <= 1'b1;
+                    state        <= start;
                 end
-                else
-                        parity <= 0;
-        end
-end
+            end
 
-always@(posedge clk or posedge rst ) begin
-	if(rst)
-		shift_reg <= 0;
-	else begin
-		if (state == tx_idle && tx_start)
-    			shift_reg <= tx_data;
-		else if (baudcount == t_bit-1 && state == tx__data)
-    			shift_reg <= {1'b0,shift_reg[7:1]};
-	end	
-end
+            start: begin
+                tx      <= 1'b0;
+                tx_busy <= 1'b1;
 
-always@(*) begin
-case(state)
-tx_idle: begin
-    tx = 1;
-    tx_busy = 0;
+                if (baud16_tick) begin
+                    if (sample_count == 4'd15) begin
+                        sample_count <= 4'd0;
+                        state        <= data;
+                    end
+                    else begin
+                        sample_count <= sample_count + 1'b1;
+                    end
+                end
+            end
 
-    if (tx_start) begin
-        next = tx__start;
+            data: begin
+                tx      <= data_reg[bit_index];
+                tx_busy <= 1'b1;
+
+                if (baud16_tick) begin
+                    if (sample_count == 4'd15) begin
+                        sample_count <= 4'd0;
+
+                        if (bit_index == 3'd7) begin
+                            bit_index <= 3'd0;
+                            state     <= parity;
+                        end
+                        else begin
+                            bit_index <= bit_index + 1'b1;
+                        end
+                    end
+                    else begin
+                        sample_count <= sample_count + 1'b1;
+                    end
+                end
+            end
+
+            parity: begin
+                tx      <= parity_reg;
+                tx_busy <= 1'b1;
+
+                if (baud16_tick) begin
+                    if (sample_count == 4'd15) begin
+                        sample_count <= 4'd0;
+                        state        <= stop;
+                    end
+                    else begin
+                        sample_count <= sample_count + 1'b1;
+                    end
+                end
+            end
+
+            stop: begin
+                tx      <= 1'b1;
+                tx_busy <= 1'b1;
+
+                if (baud16_tick) begin
+                    if (sample_count == 4'd15) begin
+                        sample_count <= 4'd0;
+                        state        <= idle;
+                    end
+                    else begin
+                        sample_count <= sample_count + 1'b1;
+                    end
+                end
+            end
+
+            default: begin
+                state        <= idle;
+                tx           <= 1'b1;
+                tx_busy      <= 1'b0;
+                bit_index    <= 3'd0;
+                sample_count <= 4'd0;
+            end
+
+        endcase
     end
-    else begin
-        next = tx_idle;
-    end
-end
-
-tx__start: begin
-    tx = 0;
-    tx_busy = 1;
-
-    if (baudcount == t_bit-1) begin
-        next = tx__data;
-    end
-    else begin
-        next = tx__start;
-    end
-end
-
-tx__data: begin
-
-    tx = shift_reg[0];
-    tx_busy = 1;
-
-    if (baudcount == t_bit-1) begin
-        if (bitcount == 4'd7) begin
-            if (parity_en)
-                next = tx_parity;
-            else
-                next = tx_stop;
-        end
-        else begin
-            next = tx__data;
-        end
-
-    end
-    else begin
-        next = tx__data;
-    end
-
-end
-
-tx_parity: begin
-        tx = parity;
-        tx_busy = 1;
-        
-        if(baudcount == t_bit-1)
-                next = tx_stop;
-        else
-                next = tx_parity;
-end
-
-tx_stop: begin
-		 tx = 1;
-    	tx_busy = 1;
-
-    if (baudcount == t_bit-1) begin
-        next = tx_idle;
-    end
-    else begin
-        next = tx_stop;
-    end
-end
-	default : begin
-		tx = 1;
-		tx_busy = 0;
-		next = tx_idle;
-	end
- endcase
 end
 
 endmodule
-		
